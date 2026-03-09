@@ -326,6 +326,7 @@ HTML_PAGE = """<!doctype html>
         <div class="toggles">
           <label><input id="show-momenta" type="checkbox" checked> Show momentum labels</label>
           <label><input id="show-leg-ids" type="checkbox"> Show leg ids</label>
+          <label><input id="show-rule-highlights" type="checkbox"> Highlight rule sources on amplitudes</label>
         </div>
         <button type="submit">Generate diagrams</button>
         <div class="examples">
@@ -384,6 +385,7 @@ HTML_PAGE = """<!doctype html>
     const layoutInput = document.getElementById("layout");
     const momentaInput = document.getElementById("show-momenta");
     const legIdsInput = document.getElementById("show-leg-ids");
+    const ruleHighlightsInput = document.getElementById("show-rule-highlights");
     const statusEl = document.getElementById("status");
     const notesEl = document.getElementById("notes");
     const viewerEl = document.getElementById("viewer");
@@ -453,16 +455,18 @@ HTML_PAGE = """<!doctype html>
       diagramDescriptionEl.textContent = diagram.description;
       diagramCounterEl.textContent = `Diagram ${currentIndex + 1} of ${currentPayload.diagrams.length}`;
       stageEl.innerHTML = diagram.svg;
+      const diagramFormula = ruleHighlightsInput.checked ? (diagram.annotated_amplitude || diagram.amplitude) : diagram.amplitude;
+      const totalFormula = ruleHighlightsInput.checked ? (currentPayload.total_annotated_amplitude || currentPayload.total_amplitude) : currentPayload.total_amplitude;
       setFormula(
         diagramAmplitudeEl,
         diagramAmplitudeRawEl,
-        diagram.amplitude,
+        diagramFormula,
         "Symbolic amplitude unavailable for this selection."
       );
       setFormula(
         totalAmplitudeEl,
         totalAmplitudeRawEl,
-        currentPayload.total_amplitude,
+        totalFormula,
         "Total amplitude unavailable for this selection."
       );
       prevButton.disabled = currentPayload.diagrams.length === 1;
@@ -523,6 +527,12 @@ HTML_PAGE = """<!doctype html>
       renderDiagram((currentIndex + 1) % currentPayload.diagrams.length);
     });
 
+    ruleHighlightsInput.addEventListener("change", () => {
+      if(currentPayload){
+        renderDiagram(currentIndex);
+      }
+    });
+
     document.querySelectorAll(".example").forEach((button) => {
       button.addEventListener("click", () => {
         reactionInput.value = button.dataset.reaction;
@@ -571,6 +581,7 @@ class DiagramHandler(BaseHTTPRequestHandler):
                 "order": bundle.order,
                 "notes": list(bundle.notes),
                 "total_amplitude": amplitude.total_expression if amplitude else "",
+                "total_annotated_amplitude": amplitude.total_annotated_expression if amplitude else "",
                 "diagrams": [
                     {
                         "index": diagram.index,
@@ -579,6 +590,11 @@ class DiagramHandler(BaseHTTPRequestHandler):
                         "filename": _diagram_filename(bundle.reaction.raw, diagram.index, diagram.title),
                         "amplitude": (
                             next(term.expression for term in amplitude.terms if term.index == diagram.index)
+                            if amplitude
+                            else ""
+                        ),
+                        "annotated_amplitude": (
+                            next(term.annotated_expression for term in amplitude.terms if term.index == diagram.index)
                             if amplitude
                             else ""
                         ),

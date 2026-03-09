@@ -70,6 +70,8 @@ class DiagramGeneratorTests(unittest.TestCase):
         amplitude = generate_symbolic_amplitudes("gamma + gamma -> e- + e+")
         self.assertEqual([term.label for term in amplitude.terms], ["t", "u"])
         self.assertIn(r"\varepsilon_{\alpha}", amplitude.terms[0].expression)
+        self.assertIn(r"\underbrace{", amplitude.terms[0].annotated_expression)
+        self.assertIn(r"\text{rule 5}", amplitude.terms[0].annotated_expression)
         self.assertIn(r"\frac{d^4 q_{1}}{(2\pi)^4}", amplitude.terms[0].expression)
         self.assertIn(r"\gamma \cdot q_{1} + m_e", amplitude.terms[0].expression)
         self.assertIn(r"-i \mathcal{M} = \left(-i \mathcal{M}_{t}\right) + \left(-i \mathcal{M}_{u}\right)", amplitude.total_expression)
@@ -86,6 +88,7 @@ class DiagramGeneratorTests(unittest.TestCase):
         self.assertIn("mathjax@3", HTML_PAGE)
         self.assertIn('class="formula-math"', HTML_PAGE)
         self.assertIn("typesetPromise", HTML_PAGE)
+        self.assertIn("show-rule-highlights", HTML_PAGE)
 
 
 if __name__ == "__main__":

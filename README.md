@@ -82,7 +82,8 @@ Examples that work in `one-loop` mode:
 
 The browser UI is an editor in the limited sense that you can enter reactions, choose the
 perturbative order, switch layout and label options, cycle through the resulting diagrams in a
-carousel, inspect the unsimplified tree-level symbolic amplitude, and export the SVG drawings.
+carousel, inspect the unsimplified tree-level symbolic amplitude, toggle rule-source highlights on
+that amplitude, and export the SVG drawings.
 
 ## Run The Browser UI
 

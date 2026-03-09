@@ -11,6 +11,7 @@ class AmplitudeTerm:
     label: str
     sign: int
     expression: str
+    annotated_expression: str
 
 
 @dataclass(frozen=True)
@@ -19,6 +20,7 @@ class SymbolicAmplitude:
     order: str
     terms: tuple[AmplitudeTerm, ...]
     total_expression: str
+    total_annotated_expression: str
     notes: tuple[str, ...]
 
 
@@ -36,6 +38,7 @@ def generate_symbolic_amplitudes(raw: str, order: str = "tree") -> SymbolicAmpli
             label=_diagram_label(diagram),
             sign=signs[position],
             expression=_diagram_expression(bundle, diagram),
+            annotated_expression=_diagram_annotated_expression(bundle, diagram),
         )
         for position, diagram in enumerate(bundle.diagrams)
     )
@@ -44,6 +47,7 @@ def generate_symbolic_amplitudes(raw: str, order: str = "tree") -> SymbolicAmpli
         order=bundle.order,
         terms=terms,
         total_expression=_total_expression(terms),
+        total_annotated_expression=_total_expression(terms),
         notes=(
             "Expressions are unsimplified rule-based tree-level amplitudes.",
             "Each term keeps the internal momentum integral and one momentum-conservation delta function per vertex.",
@@ -73,6 +77,14 @@ def _diagram_expression(bundle: DiagramBundle, diagram: Diagram) -> str:
         return _photon_exchange_expression(bundle, diagram)
     if diagram.topology == "fermion_exchange":
         return _fermion_exchange_expression(bundle, diagram)
+    raise DiagramGenerationError(f"Unsupported topology for symbolic amplitude: {diagram.topology}.")
+
+
+def _diagram_annotated_expression(bundle: DiagramBundle, diagram: Diagram) -> str:
+    if diagram.topology == "photon_exchange":
+        return _annotated_photon_exchange_expression(bundle, diagram)
+    if diagram.topology == "fermion_exchange":
+        return _annotated_fermion_exchange_expression(bundle, diagram)
     raise DiagramGenerationError(f"Unsupported topology for symbolic amplitude: {diagram.topology}.")
 
 
@@ -135,6 +147,78 @@ def _fermion_exchange_expression(bundle: DiagramBundle, diagram: Diagram) -> str
     return " ".join(factors)
 
 
+def _annotated_photon_exchange_expression(bundle: DiagramBundle, diagram: Diagram) -> str:
+    legs = {leg.identifier: leg for leg in bundle.reaction.all_legs}
+    vertex_a = tuple(legs[leg_id] for leg_id in diagram.vertex_a)
+    vertex_b = tuple(legs[leg_id] for leg_id in diagram.vertex_b)
+    mu = r"\mu"
+    nu = r"\nu"
+    q = _latex_momentum(diagram.internal_momentum)
+    delta_a = _vertex_delta(vertex_a, diagram.internal_momentum, internal_enters=False)
+    delta_b = _vertex_delta(vertex_b, diagram.internal_momentum, internal_enters=True)
+    return " ".join(
+        [
+            _annotate(r"\int \frac{d^4 " + q + r"}{(2\pi)^4}", 5),
+            _annotated_fermion_vertex_factor(vertex_a, mu),
+            _annotate(rf"\left(\frac{{-i g_{{{mu} {nu}}}}}{{{q}^2}}\right)", 3),
+            _annotated_fermion_vertex_factor(vertex_b, nu),
+            _annotate(
+                rf"(2\pi)^4 \delta^{{(4)}}\!\left({delta_b}\right) "
+                rf"(2\pi)^4 \delta^{{(4)}}\!\left({delta_a}\right)",
+                4,
+            ),
+        ]
+    )
+
+
+def _annotated_fermion_exchange_expression(bundle: DiagramBundle, diagram: Diagram) -> str:
+    legs = {leg.identifier: leg for leg in bundle.reaction.all_legs}
+    vertex_a = tuple(legs[leg_id] for leg_id in diagram.vertex_a)
+    vertex_b = tuple(legs[leg_id] for leg_id in diagram.vertex_b)
+    alpha = r"\alpha"
+    beta = r"\beta"
+    photon_a = next(leg for leg in vertex_a if leg.particle.kind == "photon")
+    photon_b = next(leg for leg in vertex_b if leg.particle.kind == "photon")
+    toward = next(leg for leg in bundle.reaction.charged_legs if leg.arrow_toward_vertex)
+    away = next(leg for leg in bundle.reaction.charged_legs if not leg.arrow_toward_vertex)
+    q = _latex_momentum(diagram.internal_momentum)
+    delta_a = _vertex_delta(vertex_a, diagram.internal_momentum, internal_enters=False)
+    delta_b = _vertex_delta(vertex_b, diagram.internal_momentum, internal_enters=True)
+    polarization_factors = " ".join(
+        _annotate(
+            _photon_factor(leg, alpha if leg.identifier == photon_a.identifier else beta),
+            2,
+        )
+        for leg in bundle.reaction.all_legs
+        if leg.particle.kind == "photon"
+    )
+    chain = (
+        r"\left["
+        + _annotate(_fermion_wavefunction(away), 2)
+        + " "
+        + _annotate(rf"(-i e \gamma^{{{beta}}})", 6)
+        + " "
+        + _annotate(_fermion_propagator(diagram.internal_particle, q), 3)
+        + " "
+        + _annotate(rf"(-i e \gamma^{{{alpha}}})", 6)
+        + " "
+        + _annotate(_fermion_wavefunction(toward), 2)
+        + r"\right]"
+    )
+    return " ".join(
+        [
+            polarization_factors,
+            _annotate(r"\int \frac{d^4 " + q + r"}{(2\pi)^4}", 5),
+            chain,
+            _annotate(
+                rf"(2\pi)^4 \delta^{{(4)}}\!\left({delta_b}\right) "
+                rf"(2\pi)^4 \delta^{{(4)}}\!\left({delta_a}\right)",
+                4,
+            ),
+        ]
+    ).strip()
+
+
 def _fermion_vertex_factor(vertex: tuple[ExternalLeg, ExternalLeg], index: str) -> str:
     away = next(leg for leg in vertex if leg.arrow_toward_vertex is False)
     toward = next(leg for leg in vertex if leg.arrow_toward_vertex is True)
@@ -142,6 +226,20 @@ def _fermion_vertex_factor(vertex: tuple[ExternalLeg, ExternalLeg], index: str) 
         _fermion_wavefunction(away)
         + rf" (-i e \gamma^{{{index}}}) "
         + _fermion_wavefunction(toward)
+    )
+
+
+def _annotated_fermion_vertex_factor(vertex: tuple[ExternalLeg, ExternalLeg], index: str) -> str:
+    away = next(leg for leg in vertex if leg.arrow_toward_vertex is False)
+    toward = next(leg for leg in vertex if leg.arrow_toward_vertex is True)
+    return (
+        r"\left["
+        + _annotate(_fermion_wavefunction(away), 2)
+        + " "
+        + _annotate(rf"(-i e \gamma^{{{index}}})", 6)
+        + " "
+        + _annotate(_fermion_wavefunction(toward), 2)
+        + r"\right]"
     )
 
 
@@ -212,6 +310,10 @@ def _total_expression(terms: tuple[AmplitudeTerm, ...]) -> str:
             continue
         pieces.append(" + " + signed_term if term.sign > 0 else " - " + signed_term)
     return "".join(pieces)
+
+
+def _annotate(expression: str, rule_number: int) -> str:
+    return rf"\underbrace{{{expression}}}_{{\text{{rule {rule_number}}}}}"
 
 
 def _latex_momentum(label: str) -> str:
