@@ -5,6 +5,7 @@ import unittest
 from qed_diagrams.amplitude import generate_symbolic_amplitudes
 from qed_diagrams.core import DiagramGenerationError, generate_diagrams
 from qed_diagrams.render import render_diagram_svg
+from qed_diagrams.web import HTML_PAGE
 
 
 class DiagramGeneratorTests(unittest.TestCase):
@@ -80,6 +81,11 @@ class DiagramGeneratorTests(unittest.TestCase):
     def test_symbolic_amplitudes_are_tree_only(self) -> None:
         with self.assertRaises(DiagramGenerationError):
             generate_symbolic_amplitudes("e- + e+ -> e- + e+", order="one-loop")
+
+    def test_web_ui_includes_mathjax_formula_rendering(self) -> None:
+        self.assertIn("mathjax@3", HTML_PAGE)
+        self.assertIn('class="formula-math"', HTML_PAGE)
+        self.assertIn("typesetPromise", HTML_PAGE)
 
 
 if __name__ == "__main__":

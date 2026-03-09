@@ -17,6 +17,19 @@ HTML_PAGE = """<!doctype html>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>QED Diagram Editor</title>
+  <script>
+    window.MathJax = {
+      tex: {
+        inlineMath: [['\\\\(', '\\\\)']],
+        displayMath: [['\\\\[', '\\\\]']],
+        processEscapes: true
+      },
+      svg: {
+        fontCache: 'global'
+      }
+    };
+  </script>
+  <script defer src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js"></script>
   <style>
     :root{
       --ink:#1f2a1f;
@@ -248,11 +261,29 @@ HTML_PAGE = """<!doctype html>
       letter-spacing:.04em;
       text-transform:uppercase;
     }
-    .formula-block pre{
+    .formula-math{
       margin:0;
+      min-height:2.2rem;
+      color:var(--ink);
+      overflow-x:auto;
+      overflow-y:hidden;
+    }
+    .formula-math mjx-container{
+      margin:0 !important;
+    }
+    .formula-raw{
+      margin-top:12px;
+    }
+    .formula-raw summary{
+      cursor:pointer;
+      color:var(--muted);
+      font:600 .9rem 'Trebuchet MS','Segoe UI',sans-serif;
+    }
+    .formula-raw pre{
+      margin:10px 0 0;
       white-space:pre-wrap;
       word-break:break-word;
-      font:500 .95rem/1.6 'Cascadia Code','Consolas',monospace;
+      font:500 .9rem/1.6 'Cascadia Code','Consolas',monospace;
       color:var(--ink);
     }
     @media (max-width: 980px){
@@ -328,11 +359,19 @@ HTML_PAGE = """<!doctype html>
           </div>
           <div class="formula-block">
             <h3>Diagram amplitude</h3>
-            <pre id="diagram-amplitude"></pre>
+            <div class="formula-math" id="diagram-amplitude"></div>
+            <details class="formula-raw">
+              <summary>Show raw LaTeX</summary>
+              <pre id="diagram-amplitude-raw"></pre>
+            </details>
           </div>
           <div class="formula-block">
             <h3>Total amplitude</h3>
-            <pre id="total-amplitude"></pre>
+            <div class="formula-math" id="total-amplitude"></div>
+            <details class="formula-raw">
+              <summary>Show raw LaTeX</summary>
+              <pre id="total-amplitude-raw"></pre>
+            </details>
           </div>
         </section>
       </section>
@@ -358,6 +397,8 @@ HTML_PAGE = """<!doctype html>
     const downloadButton = document.getElementById("download-button");
     const diagramAmplitudeEl = document.getElementById("diagram-amplitude");
     const totalAmplitudeEl = document.getElementById("total-amplitude");
+    const diagramAmplitudeRawEl = document.getElementById("diagram-amplitude-raw");
+    const totalAmplitudeRawEl = document.getElementById("total-amplitude-raw");
 
     let currentPayload = null;
     let currentIndex = 0;
@@ -377,6 +418,28 @@ HTML_PAGE = """<!doctype html>
       });
     }
 
+    function escapeHtml(value){
+      return value
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;");
+    }
+
+    function setFormula(target, rawTarget, latex, fallbackMessage){
+      const hasLatex = Boolean(latex && latex.trim());
+      const content = hasLatex ? latex : fallbackMessage;
+      rawTarget.textContent = content;
+      target.innerHTML = hasLatex ? `\\\\[${escapeHtml(content)}\\\\]` : `<p>${escapeHtml(content)}</p>`;
+    }
+
+    function typesetMath(){
+      if(window.MathJax && window.MathJax.typesetPromise){
+        window.MathJax.typesetClear?.();
+        return window.MathJax.typesetPromise();
+      }
+      return Promise.resolve();
+    }
+
     function renderDiagram(index){
       if(!currentPayload || !currentPayload.diagrams.length){
         viewerEl.hidden = true;
@@ -390,8 +453,18 @@ HTML_PAGE = """<!doctype html>
       diagramDescriptionEl.textContent = diagram.description;
       diagramCounterEl.textContent = `Diagram ${currentIndex + 1} of ${currentPayload.diagrams.length}`;
       stageEl.innerHTML = diagram.svg;
-      diagramAmplitudeEl.textContent = diagram.amplitude || "Symbolic amplitude unavailable for this selection.";
-      totalAmplitudeEl.textContent = currentPayload.total_amplitude || "";
+      setFormula(
+        diagramAmplitudeEl,
+        diagramAmplitudeRawEl,
+        diagram.amplitude,
+        "Symbolic amplitude unavailable for this selection."
+      );
+      setFormula(
+        totalAmplitudeEl,
+        totalAmplitudeRawEl,
+        currentPayload.total_amplitude,
+        "Total amplitude unavailable for this selection."
+      );
       prevButton.disabled = currentPayload.diagrams.length === 1;
       nextButton.disabled = currentPayload.diagrams.length === 1;
       downloadButton.onclick = () => {
@@ -403,6 +476,7 @@ HTML_PAGE = """<!doctype html>
         link.click();
         URL.revokeObjectURL(url);
       };
+      typesetMath();
     }
 
     function renderResponse(payload){
