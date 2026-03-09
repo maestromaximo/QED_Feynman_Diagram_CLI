@@ -97,6 +97,7 @@ The custom-theory workspace currently supports:
 - user-defined 3-point interaction vertices,
 - connected tree-level `2 -> 2` diagram generation from two vertices,
 - unsimplified symbolic tree-level amplitudes built from the supplied vertex factors,
+- rule-source highlighting on custom symbolic amplitudes in the browser UI,
 - fermion, scalar, and vector line styles.
 
 The default custom example is the Yukawa-like theory:
@@ -114,8 +115,7 @@ Current boundary for custom theories:
 
 - tree-level `2 -> 2` only,
 - 3-point vertices only,
-- no spin sums, traces, or cross-section calculations yet,
-- no custom rule-source highlighting yet.
+- no spin sums, traces, or cross-section calculations yet.
 
 ## Run The Browser UI
 

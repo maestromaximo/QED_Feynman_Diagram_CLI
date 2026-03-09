@@ -548,7 +548,6 @@ HTML_PAGE = """<!doctype html>
       qedConfigEl.classList.toggle("hidden", custom);
       qedExamplesEl.classList.toggle("hidden", custom);
       customExamplesEl.classList.toggle("hidden", !custom);
-      ruleHighlightsInput.parentElement.classList.toggle("hidden", custom);
       if(custom){
         orderInput.value = "tree";
         reactionInput.value = "e+ + e- -> 2phi";

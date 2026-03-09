@@ -108,6 +108,9 @@ class DiagramGeneratorTests(unittest.TestCase):
         self.assertIn(r"\bar{v}^{(i_{1})}\!\left(p_{1}\right)", amplitude.terms[0].expression)
         self.assertIn(r"i g \gamma^5", amplitude.terms[0].expression)
         self.assertIn(r"\frac{i (\gamma \cdot q_{1} + m_e)}{q_{1}^2 - m_e^2}", amplitude.terms[0].expression)
+        self.assertIn(r"\underbrace{", amplitude.terms[0].annotated_expression)
+        self.assertIn(r"\text{rule 5}", amplitude.terms[0].annotated_expression)
+        self.assertIn(r"\text{rule 6}", amplitude.terms[0].annotated_expression)
         self.assertIn(r"-i \mathcal{M} = \left(-i \mathcal{M}_{t}\right) + \left(-i \mathcal{M}_{u}\right)", amplitude.total_expression)
 
     def test_custom_theory_html_includes_custom_mode(self) -> None:

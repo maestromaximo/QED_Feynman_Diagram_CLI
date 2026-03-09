@@ -407,19 +407,13 @@ def _custom_amplitude_term(
     bundle: DiagramBundle,
     diagram: Diagram,
 ) -> CustomAmplitudeTerm:
-    term = CustomAmplitudeTerm(
+    expression = _custom_diagram_expression(theory, bundle, diagram)
+    return CustomAmplitudeTerm(
         index=diagram.index,
         label=diagram.channel or str(diagram.index),
         sign=1,
-        expression=_custom_diagram_expression(theory, bundle, diagram),
-        annotated_expression="",
-    )
-    return CustomAmplitudeTerm(
-        index=term.index,
-        label=term.label,
-        sign=term.sign,
-        expression=term.expression,
-        annotated_expression=term.expression,
+        expression=expression,
+        annotated_expression=_custom_diagram_annotated_expression(theory, bundle, diagram),
     )
 
 
@@ -432,6 +426,18 @@ def _custom_diagram_expression(
         return _custom_fermion_exchange_expression(theory, bundle, diagram)
     if diagram.topology in {"scalar_exchange", "vector_exchange"}:
         return _custom_boson_exchange_expression(theory, bundle, diagram)
+    raise DiagramGenerationError(f"Unsupported custom-theory topology for amplitudes: {diagram.topology}.")
+
+
+def _custom_diagram_annotated_expression(
+    theory: CustomTheory,
+    bundle: DiagramBundle,
+    diagram: Diagram,
+) -> str:
+    if diagram.topology == "fermion_exchange":
+        return _annotated_custom_fermion_exchange_expression(theory, bundle, diagram)
+    if diagram.topology in {"scalar_exchange", "vector_exchange"}:
+        return _annotated_custom_boson_exchange_expression(theory, bundle, diagram)
     raise DiagramGenerationError(f"Unsupported custom-theory topology for amplitudes: {diagram.topology}.")
 
 
@@ -483,6 +489,59 @@ def _custom_fermion_exchange_expression(
     return " ".join(pieces)
 
 
+def _annotated_custom_fermion_exchange_expression(
+    theory: CustomTheory,
+    bundle: DiagramBundle,
+    diagram: Diagram,
+) -> str:
+    legs = {leg.identifier: leg for leg in bundle.reaction.all_legs}
+    vertex_a_legs = tuple(legs[leg_id] for leg_id in diagram.vertex_a)
+    vertex_b_legs = tuple(legs[leg_id] for leg_id in diagram.vertex_b)
+    vertex_a = _resolve_custom_vertex(theory, diagram, vertex_a_legs)
+    vertex_b = _resolve_custom_vertex(theory, diagram, vertex_b_legs)
+    away = next(leg for leg in bundle.reaction.charged_legs if leg.arrow_toward_vertex is False)
+    toward = next(leg for leg in bundle.reaction.charged_legs if leg.arrow_toward_vertex is True)
+    away_vertex = vertex_a if away.identifier in diagram.vertex_a else vertex_b
+    toward_vertex = vertex_a if toward.identifier in diagram.vertex_a else vertex_b
+    q = _latex_momentum(diagram.internal_momentum)
+    delta_a = _custom_vertex_delta(vertex_a_legs, diagram.internal_momentum, internal_enters=False)
+    delta_b = _custom_vertex_delta(vertex_b_legs, diagram.internal_momentum, internal_enters=True)
+    external_factors = " ".join(
+        _annotate(_custom_external_factor(leg, index), 2)
+        for leg, index in zip(
+            [leg for leg in bundle.reaction.all_legs if leg.particle.kind in {"vector", "photon"}],
+            [r"\alpha", r"\beta", r"\mu", r"\nu"],
+        )
+        if _custom_external_factor(leg, index)
+    )
+    chain = (
+        r"\left["
+        + _annotate(_custom_fermion_wavefunction(away), 2)
+        + " "
+        + _annotate(_vertex_factor_latex(away_vertex), 6)
+        + " "
+        + _annotate(_custom_propagator(theory, diagram.internal_particle, q), 3)
+        + " "
+        + _annotate(_vertex_factor_latex(toward_vertex), 6)
+        + " "
+        + _annotate(_custom_fermion_wavefunction(toward), 2)
+        + r"\right]"
+    )
+    pieces = []
+    if external_factors:
+        pieces.append(external_factors)
+    pieces.append(_annotate(r"\int \frac{d^4 " + q + r"}{(2\pi)^4}", 5))
+    pieces.append(chain)
+    pieces.append(
+        _annotate(
+            rf"(2\pi)^4 \delta^{{(4)}}\!\left({delta_b}\right) "
+            rf"(2\pi)^4 \delta^{{(4)}}\!\left({delta_a}\right)",
+            4,
+        )
+    )
+    return " ".join(pieces)
+
+
 def _custom_boson_exchange_expression(
     theory: CustomTheory,
     bundle: DiagramBundle,
@@ -506,6 +565,34 @@ def _custom_boson_exchange_expression(
             right,
             rf"(2\pi)^4 \delta^{{(4)}}\!\left({delta_b}\right)",
             rf"(2\pi)^4 \delta^{{(4)}}\!\left({delta_a}\right)",
+        ]
+    )
+
+
+def _annotated_custom_boson_exchange_expression(
+    theory: CustomTheory,
+    bundle: DiagramBundle,
+    diagram: Diagram,
+) -> str:
+    legs = {leg.identifier: leg for leg in bundle.reaction.all_legs}
+    vertex_a_legs = tuple(legs[leg_id] for leg_id in diagram.vertex_a)
+    vertex_b_legs = tuple(legs[leg_id] for leg_id in diagram.vertex_b)
+    vertex_a = _resolve_custom_vertex(theory, diagram, vertex_a_legs)
+    vertex_b = _resolve_custom_vertex(theory, diagram, vertex_b_legs)
+    q = _latex_momentum(diagram.internal_momentum)
+    delta_a = _custom_vertex_delta(vertex_a_legs, diagram.internal_momentum, internal_enters=False)
+    delta_b = _custom_vertex_delta(vertex_b_legs, diagram.internal_momentum, internal_enters=True)
+    return " ".join(
+        [
+            _annotate(r"\int \frac{d^4 " + q + r"}{(2\pi)^4}", 5),
+            _annotated_custom_vertex_external_product(vertex_a_legs, vertex_a),
+            _annotate(_custom_propagator(theory, diagram.internal_particle, q), 3),
+            _annotated_custom_vertex_external_product(vertex_b_legs, vertex_b),
+            _annotate(
+                rf"(2\pi)^4 \delta^{{(4)}}\!\left({delta_b}\right) "
+                rf"(2\pi)^4 \delta^{{(4)}}\!\left({delta_a}\right)",
+                4,
+            ),
         ]
     )
 
@@ -540,6 +627,19 @@ def _custom_vertex_external_product(
     if factors:
         return r"\left[" + " ".join(factors + [factor]) + r"\right]"
     return r"\left[" + factor + r"\right]"
+
+
+def _annotated_custom_vertex_external_product(
+    group: tuple[ExternalLeg, ExternalLeg],
+    vertex: TheoryVertex,
+) -> str:
+    factors = [
+        _annotate(factor, 2)
+        for position, leg in enumerate(group)
+        if (factor := _custom_external_factor(leg, r"\mu" if position == 0 else r"\nu"))
+    ]
+    factors.append(_annotate(_vertex_factor_latex(vertex), 6))
+    return r"\left[" + " ".join(factors) + r"\right]"
 
 
 def _custom_external_factor(leg: ExternalLeg, index: str) -> str:
@@ -622,6 +722,10 @@ def _custom_total_expression(terms: tuple[CustomAmplitudeTerm, ...]) -> str:
         else:
             pieces.append(" + " + piece if term.sign > 0 else " - " + piece)
     return "".join(pieces)
+
+
+def _annotate(expression: str, rule_number: int) -> str:
+    return rf"\underbrace{{{expression}}}_{{\text{{rule {rule_number}}}}}"
 
 
 def _latex_momentum(label: str) -> str:
