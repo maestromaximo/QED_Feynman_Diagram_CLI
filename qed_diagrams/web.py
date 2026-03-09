@@ -6,6 +6,7 @@ import json
 import re
 from urllib.parse import parse_qs, urlparse
 
+from .amplitude import generate_symbolic_amplitudes
 from .core import DiagramGenerationError, generate_diagrams
 from .render import RenderOptions, render_diagram_svg
 
@@ -233,6 +234,27 @@ HTML_PAGE = """<!doctype html>
       font-size:.95rem;
       font-weight:600;
     }
+    .formula-block{
+      margin-top:18px;
+      padding:16px 18px;
+      border-radius:18px;
+      background:#f8f2e2;
+      border:1px solid rgba(214,199,163,.85);
+    }
+    .formula-block h3{
+      margin:0 0 10px;
+      font:700 1.05rem 'Trebuchet MS','Segoe UI',sans-serif;
+      color:var(--accent);
+      letter-spacing:.04em;
+      text-transform:uppercase;
+    }
+    .formula-block pre{
+      margin:0;
+      white-space:pre-wrap;
+      word-break:break-word;
+      font:500 .95rem/1.6 'Cascadia Code','Consolas',monospace;
+      color:var(--ink);
+    }
     @media (max-width: 980px){
       .shell{grid-template-columns:1fr}
       .row{grid-template-columns:1fr}
@@ -304,6 +326,14 @@ HTML_PAGE = """<!doctype html>
             <div class="counter" id="diagram-counter"></div>
             <button class="ghost" type="button" id="download-button">Download SVG</button>
           </div>
+          <div class="formula-block">
+            <h3>Diagram amplitude</h3>
+            <pre id="diagram-amplitude"></pre>
+          </div>
+          <div class="formula-block">
+            <h3>Total amplitude</h3>
+            <pre id="total-amplitude"></pre>
+          </div>
         </section>
       </section>
     </section>
@@ -326,6 +356,8 @@ HTML_PAGE = """<!doctype html>
     const prevButton = document.getElementById("prev-button");
     const nextButton = document.getElementById("next-button");
     const downloadButton = document.getElementById("download-button");
+    const diagramAmplitudeEl = document.getElementById("diagram-amplitude");
+    const totalAmplitudeEl = document.getElementById("total-amplitude");
 
     let currentPayload = null;
     let currentIndex = 0;
@@ -358,6 +390,8 @@ HTML_PAGE = """<!doctype html>
       diagramDescriptionEl.textContent = diagram.description;
       diagramCounterEl.textContent = `Diagram ${currentIndex + 1} of ${currentPayload.diagrams.length}`;
       stageEl.innerHTML = diagram.svg;
+      diagramAmplitudeEl.textContent = diagram.amplitude || "Symbolic amplitude unavailable for this selection.";
+      totalAmplitudeEl.textContent = currentPayload.total_amplitude || "";
       prevButton.disabled = currentPayload.diagrams.length === 1;
       nextButton.disabled = currentPayload.diagrams.length === 1;
       downloadButton.onclick = () => {
@@ -452,6 +486,7 @@ class DiagramHandler(BaseHTTPRequestHandler):
 
         try:
             bundle = generate_diagrams(reaction, order=order)
+            amplitude = generate_symbolic_amplitudes(reaction, order="tree") if order == "tree" else None
             options = RenderOptions(
                 compact=compact,
                 show_leg_ids=show_leg_ids,
@@ -461,12 +496,18 @@ class DiagramHandler(BaseHTTPRequestHandler):
                 "reaction": bundle.reaction.raw,
                 "order": bundle.order,
                 "notes": list(bundle.notes),
+                "total_amplitude": amplitude.total_expression if amplitude else "",
                 "diagrams": [
                     {
                         "index": diagram.index,
                         "title": diagram.title,
                         "description": diagram.description,
                         "filename": _diagram_filename(bundle.reaction.raw, diagram.index, diagram.title),
+                        "amplitude": (
+                            next(term.expression for term in amplitude.terms if term.index == diagram.index)
+                            if amplitude
+                            else ""
+                        ),
                         "svg": render_diagram_svg(bundle, diagram, options),
                     }
                     for diagram in bundle.diagrams

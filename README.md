@@ -6,6 +6,7 @@ This repository now contains a working QED Feynman diagram editor/generator with
 - a browser carousel for cycling through generated diagrams,
 - explicit momentum labels on external and internal lines,
 - tree-level generation for supported `2 -> 2` reactions,
+- unsimplified rule-based symbolic leading-order amplitudes for tree diagrams,
 - initial one-loop support for vacuum-polarization corrections on virtual-photon exchange diagrams.
 
 It does one job deliberately:
@@ -81,7 +82,7 @@ Examples that work in `one-loop` mode:
 
 The browser UI is an editor in the limited sense that you can enter reactions, choose the
 perturbative order, switch layout and label options, cycle through the resulting diagrams in a
-carousel, and export the SVG drawings.
+carousel, inspect the unsimplified tree-level symbolic amplitude, and export the SVG drawings.
 
 ## Run The Browser UI
 
@@ -110,6 +111,25 @@ Optional flags:
 - `--compact`
 - `--show-leg-ids`
 - `--hide-momenta`
+
+## Print Symbolic Leading-Order Amplitudes
+
+```bash
+python3 -m qed_diagrams amplitude "gamma + gamma -> e- + e+"
+```
+
+This prints:
+
+- the total unsimplified tree-level amplitude written as a sum or difference of diagram terms,
+- one rule-based expression per diagram,
+- the internal `q_1` momentum integral,
+- propagators, external spinors/polarizations, and vertex delta functions.
+
+Current boundary:
+
+- symbolic amplitudes are implemented for `tree` order only,
+- they are not algebraically simplified,
+- they do not yet perform traces, spin sums, polarization sums, or cross-section calculations.
 
 ## Tests
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import unittest
 
+from qed_diagrams.amplitude import generate_symbolic_amplitudes
 from qed_diagrams.core import DiagramGenerationError, generate_diagrams
 from qed_diagrams.render import render_diagram_svg
 
@@ -63,6 +64,22 @@ class DiagramGeneratorTests(unittest.TestCase):
         self.assertIn("<svg", svg)
         self.assertIn("p1", svg)
         self.assertIn("q1", svg)
+
+    def test_pair_production_symbolic_amplitude_has_t_and_u_terms(self) -> None:
+        amplitude = generate_symbolic_amplitudes("gamma + gamma -> e- + e+")
+        self.assertEqual([term.label for term in amplitude.terms], ["t", "u"])
+        self.assertIn(r"\varepsilon_{\alpha}", amplitude.terms[0].expression)
+        self.assertIn(r"\frac{d^4 q_{1}}{(2\pi)^4}", amplitude.terms[0].expression)
+        self.assertIn(r"\gamma \cdot q_{1} + m_e", amplitude.terms[0].expression)
+        self.assertIn(r"-i \mathcal{M} = \left(-i \mathcal{M}_{t}\right) + \left(-i \mathcal{M}_{u}\right)", amplitude.total_expression)
+
+    def test_bhabha_symbolic_total_amplitude_subtracts_terms(self) -> None:
+        amplitude = generate_symbolic_amplitudes("e- + e+ -> e- + e+")
+        self.assertIn(r"- \left(-i \mathcal{M}_{t}\right)", amplitude.total_expression)
+
+    def test_symbolic_amplitudes_are_tree_only(self) -> None:
+        with self.assertRaises(DiagramGenerationError):
+            generate_symbolic_amplitudes("e- + e+ -> e- + e+", order="one-loop")
 
 
 if __name__ == "__main__":

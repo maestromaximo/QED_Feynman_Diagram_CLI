@@ -470,8 +470,12 @@ def _build_notes(
         )
 
     charged_families = [leg.particle.family for leg in reaction.charged_legs]
-    repeated_families = {family for family in charged_families if family and charged_families.count(family) > 1}
-    if repeated_families and len(diagrams) > 1:
+    if (
+        len(reaction.charged_legs) == 4
+        and len(diagrams) > 1
+        and charged_families
+        and len(set(charged_families)) == 1
+    ):
         notes.append(
             "Multiple diagrams are related by identical-fermion interchange; relative minus signs matter in amplitudes, "
             "but this tool intentionally stops at topology and drawing."

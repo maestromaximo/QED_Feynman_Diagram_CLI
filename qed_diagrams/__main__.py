@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+from .amplitude import generate_symbolic_amplitudes
 from .core import DiagramGenerationError, generate_diagrams
 from .render import RenderOptions, render_diagram_svg
 from .web import serve
@@ -43,6 +44,21 @@ def main() -> int:
         help="Hide momentum labels such as p1, p1', and q1.",
     )
 
+    amplitude_parser = subparsers.add_parser(
+        "amplitude",
+        help="Print unsimplified rule-based leading-order symbolic amplitudes.",
+    )
+    amplitude_parser.add_argument(
+        "reaction",
+        help="Reaction string, for example: gamma + gamma -> e- + e+",
+    )
+    amplitude_parser.add_argument(
+        "--order",
+        default="tree",
+        choices=["tree"],
+        help="Perturbative order for symbolic amplitudes.",
+    )
+
     serve_parser = subparsers.add_parser("serve", help="Run the local browser UI.")
     serve_parser.add_argument("--host", default="127.0.0.1")
     serve_parser.add_argument("--port", type=int, default=8000)
@@ -76,6 +92,20 @@ def main() -> int:
 
         for note in bundle.notes:
             print(f"note: {note}")
+        return 0
+
+    if args.command == "amplitude":
+        try:
+            amplitude = generate_symbolic_amplitudes(args.reaction, order=args.order)
+        except DiagramGenerationError as exc:
+            parser.error(str(exc))
+
+        print(amplitude.total_expression)
+        for term in amplitude.terms:
+            print()
+            print(f"-i \\mathcal{{M}}_{{{term.label}}} = {term.expression}")
+        for note in amplitude.notes:
+            print(f"\nnote: {note}")
         return 0
 
     parser.print_help()
