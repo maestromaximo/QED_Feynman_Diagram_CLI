@@ -7,6 +7,7 @@ This repository now contains a working QED Feynman diagram editor/generator with
 - explicit momentum labels on external and internal lines,
 - tree-level generation for supported `2 -> 2` reactions,
 - unsimplified rule-based symbolic leading-order amplitudes for tree diagrams,
+- a custom-theory mode for user-defined particles and 3-point vertices,
 - initial one-loop support for vacuum-polarization corrections on virtual-photon exchange diagrams.
 
 It does one job deliberately:
@@ -42,6 +43,9 @@ Supported process classes:
 - pair annihilation into two photons
 - pair production from two photons
 - one-loop vacuum-polarization corrections on four-fermion photon-exchange diagrams
+
+In the browser UI there is also a custom-theory mode for user-defined tree-level `2 -> 2`
+diagram generation from 3-point interactions.
 
 Examples:
 
@@ -83,7 +87,34 @@ Examples that work in `one-loop` mode:
 The browser UI is an editor in the limited sense that you can enter reactions, choose the
 perturbative order, switch layout and label options, cycle through the resulting diagrams in a
 carousel, inspect the unsimplified tree-level symbolic amplitude, toggle rule-source highlights on
-that amplitude, and export the SVG drawings.
+that amplitude, switch to a custom-theory workspace, and export the SVG drawings.
+
+## Custom Theory Mode
+
+The custom-theory workspace currently supports:
+
+- user-defined particles in JSON,
+- user-defined 3-point interaction vertices,
+- connected tree-level `2 -> 2` diagram generation from two vertices,
+- fermion, scalar, and vector line styles.
+
+The default custom example is the Yukawa-like theory:
+
+- `e-`
+- `e+`
+- `phi`
+- vertex `e- e+ phi` with factor `i g \gamma^5`
+
+That lets you generate the expected lowest-order diagrams for:
+
+- `e+ + e- -> 2phi`
+
+Current boundary for custom theories:
+
+- diagrams only,
+- tree-level `2 -> 2` only,
+- 3-point vertices only,
+- no custom symbolic amplitudes yet.
 
 ## Run The Browser UI
 

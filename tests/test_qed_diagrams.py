@@ -4,6 +4,7 @@ import unittest
 
 from qed_diagrams.amplitude import generate_symbolic_amplitudes
 from qed_diagrams.core import DiagramGenerationError, generate_diagrams
+from qed_diagrams.custom_theory import DEFAULT_CUSTOM_THEORY, generate_custom_theory_diagrams
 from qed_diagrams.render import render_diagram_svg
 from qed_diagrams.web import HTML_PAGE
 
@@ -89,6 +90,16 @@ class DiagramGeneratorTests(unittest.TestCase):
         self.assertIn('class="formula-math"', HTML_PAGE)
         self.assertIn("typesetPromise", HTML_PAGE)
         self.assertIn("show-rule-highlights", HTML_PAGE)
+
+    def test_custom_theory_yukawa_example_generates_t_and_u_diagrams(self) -> None:
+        theory, bundle = generate_custom_theory_diagrams(DEFAULT_CUSTOM_THEORY, "e+ + e- -> 2phi")
+        self.assertEqual(theory.name, "Electron-pseudoscalar Yukawa theory")
+        self.assertEqual([diagram.channel for diagram in bundle.diagrams], ["t", "u"])
+        self.assertTrue(all(diagram.topology == "fermion_exchange" for diagram in bundle.diagrams))
+
+    def test_custom_theory_html_includes_custom_mode(self) -> None:
+        self.assertIn("Custom theory", HTML_PAGE)
+        self.assertIn("custom-theory", HTML_PAGE)
 
 
 if __name__ == "__main__":

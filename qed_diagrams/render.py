@@ -4,7 +4,7 @@ from dataclasses import dataclass
 import html
 import math
 
-from .core import Diagram, DiagramBundle, ExternalLeg, diagram_lookup
+from .core import Diagram, DiagramBundle, ExternalLeg
 
 
 @dataclass(frozen=True)
@@ -20,7 +20,7 @@ def render_diagram_svg(
     options: RenderOptions | None = None,
 ) -> str:
     options = options or RenderOptions()
-    legs = diagram_lookup(bundle)
+    legs = {leg.identifier: leg for leg in bundle.reaction.all_legs}
     width = 860 if options.compact else 980
     height = 440 if options.compact else 520
 
@@ -38,6 +38,7 @@ def render_diagram_svg(
         ".vertex{fill:#1f2a1f;}"
         ".fermion{stroke:#1f2a1f;stroke-width:3.6;fill:none;stroke-linecap:round;}"
         ".photon{stroke:#8f2d1b;stroke-width:3.2;fill:none;stroke-linecap:round;stroke-linejoin:round;}"
+        ".scalar{stroke:#59644f;stroke-width:3.2;fill:none;stroke-linecap:round;stroke-dasharray:10 8;}"
         ".arrow{stroke:#1f2a1f;stroke-width:2.6;fill:none;stroke-linecap:round;stroke-linejoin:round;}"
         ".particle{font:700 18px 'Trebuchet MS','Segoe UI',sans-serif;fill:#1f2a1f;}"
         ".momentum{font:600 13px 'Trebuchet MS','Segoe UI',sans-serif;fill:#5a6654;}"
@@ -56,8 +57,10 @@ def render_diagram_svg(
     for leg_id in diagram.vertex_b:
         svg.extend(_draw_external_edge(legs[leg_id], points, vertex_b, options))
 
-    if diagram.topology == "photon_exchange":
+    if diagram.topology in {"photon_exchange", "vector_exchange"}:
         svg.extend(_draw_internal_photon(diagram, vertex_a, vertex_b, options))
+    elif diagram.topology == "scalar_exchange":
+        svg.extend(_draw_internal_scalar(diagram, vertex_a, vertex_b, options))
     else:
         svg.extend(_draw_internal_fermion(diagram, vertex_a, vertex_b, options))
 
@@ -149,8 +152,10 @@ def _draw_external_edge(
     particle_x, particle_y = _particle_label_position(anchor, vertex, leg.side)
     particle_label = leg.particle.label if not options.show_leg_ids else f"{leg.identifier} {leg.particle.label}"
 
-    if leg.particle.kind == "photon":
+    if leg.particle.kind in {"photon", "vector"}:
         edge_parts = _draw_photon(anchor, vertex)
+    elif leg.particle.kind == "scalar":
+        edge_parts = _draw_scalar(anchor, vertex)
     else:
         edge_parts = _draw_fermion(anchor, vertex, leg.arrow_toward_vertex)
 
@@ -253,6 +258,22 @@ def _draw_internal_fermion(
     return parts
 
 
+def _draw_internal_scalar(
+    diagram: Diagram,
+    vertex_a: tuple[float, float],
+    vertex_b: tuple[float, float],
+    options: RenderOptions,
+) -> list[str]:
+    parts = _draw_scalar(vertex_a, vertex_b)
+    if options.show_momenta:
+        label_x, label_y = _mid_label_position(vertex_a, vertex_b, -18)
+        parts.append(
+            f'<text class="momentum" x="{label_x}" y="{label_y}" text-anchor="middle">'
+            f"{html.escape(diagram.internal_momentum)}</text>"
+        )
+    return parts
+
+
 def _draw_fermion(
     anchor: tuple[float, float],
     vertex: tuple[float, float],
@@ -272,6 +293,15 @@ def _draw_photon(
     points = _wavy_points(start, end, amplitude=8, wavelength=22)
     path = "M " + " L ".join(f"{x:.2f} {y:.2f}" for x, y in points)
     return [f'<path class="photon" d="{path}" />']
+
+
+def _draw_scalar(
+    start: tuple[float, float],
+    end: tuple[float, float],
+) -> list[str]:
+    return [
+        f'<line class="scalar" x1="{start[0]}" y1="{start[1]}" x2="{end[0]}" y2="{end[1]}" />'
+    ]
 
 
 def _wavy_points(

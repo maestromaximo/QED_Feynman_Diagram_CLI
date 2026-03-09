@@ -8,6 +8,7 @@ from urllib.parse import parse_qs, urlparse
 
 from .amplitude import generate_symbolic_amplitudes
 from .core import DiagramGenerationError, generate_diagrams
+from .custom_theory import DEFAULT_CUSTOM_THEORY, generate_custom_theory_diagrams
 from .render import RenderOptions, render_diagram_svg
 
 
@@ -70,6 +71,25 @@ HTML_PAGE = """<!doctype html>
       gap:22px;
       align-items:start;
     }
+    .mode-switch{
+      display:flex;
+      gap:10px;
+      margin:0 0 20px;
+    }
+    .mode-chip{
+      border:1px solid var(--line);
+      border-radius:999px;
+      padding:10px 14px;
+      background:#fff;
+      color:var(--muted);
+      cursor:pointer;
+      font:700 .95rem 'Trebuchet MS','Segoe UI',sans-serif;
+    }
+    .mode-chip.active{
+      background:linear-gradient(135deg, #8f2d1b 0%, #bf5c26 100%);
+      color:#fff;
+      border-color:#8f2d1b;
+    }
     .card{
       border:1px solid var(--line);
       border-radius:28px;
@@ -95,6 +115,17 @@ HTML_PAGE = """<!doctype html>
       background:#fff;
       font-size:1rem;
       color:var(--ink);
+    }
+    textarea{
+      width:100%;
+      min-height:220px;
+      padding:14px 16px;
+      border-radius:16px;
+      border:1px solid var(--line);
+      background:#fff;
+      font:500 .92rem/1.5 'Cascadia Code','Consolas',monospace;
+      color:var(--ink);
+      resize:vertical;
     }
     .field{margin-bottom:16px}
     .row{
@@ -286,6 +317,7 @@ HTML_PAGE = """<!doctype html>
       font:500 .9rem/1.6 'Cascadia Code','Consolas',monospace;
       color:var(--ink);
     }
+    .hidden{display:none !important}
     @media (max-width: 980px){
       .shell{grid-template-columns:1fr}
       .row{grid-template-columns:1fr}
@@ -298,16 +330,20 @@ HTML_PAGE = """<!doctype html>
   <main>
     <h1>QED Diagram Editor</h1>
     <p class="lede">
-      Generate lowest-order and selected one-loop QED diagrams with explicit particle and momentum labels.
+      Generate lowest-order and selected one-loop QED diagrams, or switch to a custom-theory mode where you define particles and 3-point vertices yourself.
       The viewer keeps one large stage active at a time so the diagram can breathe instead of being squeezed into a stacked list.
     </p>
+    <div class="mode-switch" role="tablist" aria-label="Theory mode">
+      <button class="mode-chip active" type="button" id="mode-qed" data-mode="qed">QED</button>
+      <button class="mode-chip" type="button" id="mode-custom" data-mode="custom">Custom theory</button>
+    </div>
     <section class="shell">
       <form class="card controls" id="controls">
         <div class="field">
           <label for="reaction">Reaction</label>
           <input id="reaction" name="reaction" type="text" value="e- + e+ -> mu- + mu+" spellcheck="false">
         </div>
-        <div class="row">
+        <div class="row" id="qed-config">
           <div class="field">
             <label for="order">Perturbative order</label>
             <select id="order" name="order">
@@ -328,12 +364,19 @@ HTML_PAGE = """<!doctype html>
           <label><input id="show-leg-ids" type="checkbox"> Show leg ids</label>
           <label><input id="show-rule-highlights" type="checkbox"> Highlight rule sources on amplitudes</label>
         </div>
+        <div class="field hidden" id="custom-theory-field">
+          <label for="custom-theory">Theory definition</label>
+          <textarea id="custom-theory" spellcheck="false">__CUSTOM_THEORY__</textarea>
+        </div>
         <button type="submit">Generate diagrams</button>
-        <div class="examples">
-          <button class="example" type="button" data-reaction="e- + mu- -> e- + mu-" data-order="tree">e- + mu- -&gt; e- + mu-</button>
-          <button class="example" type="button" data-reaction="e- + e+ -> e- + e+" data-order="one-loop">e- + e+ -&gt; e- + e+ (loop)</button>
-          <button class="example" type="button" data-reaction="e- + gamma -> e- + gamma" data-order="tree">e- + gamma -&gt; e- + gamma</button>
-          <button class="example" type="button" data-reaction="e- + e+ -> gamma + gamma" data-order="tree">e- + e+ -&gt; gamma + gamma</button>
+        <div class="examples" id="qed-examples">
+          <button class="example" type="button" data-mode="qed" data-reaction="e- + mu- -> e- + mu-" data-order="tree">e- + mu- -&gt; e- + mu-</button>
+          <button class="example" type="button" data-mode="qed" data-reaction="e- + e+ -> e- + e+" data-order="one-loop">e- + e+ -&gt; e- + e+ (loop)</button>
+          <button class="example" type="button" data-mode="qed" data-reaction="e- + gamma -> e- + gamma" data-order="tree">e- + gamma -&gt; e- + gamma</button>
+          <button class="example" type="button" data-mode="qed" data-reaction="e- + e+ -> gamma + gamma" data-order="tree">e- + e+ -&gt; gamma + gamma</button>
+        </div>
+        <div class="examples hidden" id="custom-examples">
+          <button class="example" type="button" data-mode="custom" data-reaction="e+ + e- -> 2phi">e+ + e- -&gt; 2phi</button>
         </div>
       </form>
       <section class="card results">
@@ -358,7 +401,7 @@ HTML_PAGE = """<!doctype html>
             <div class="counter" id="diagram-counter"></div>
             <button class="ghost" type="button" id="download-button">Download SVG</button>
           </div>
-          <div class="formula-block">
+          <div class="formula-block" id="diagram-amplitude-block">
             <h3>Diagram amplitude</h3>
             <div class="formula-math" id="diagram-amplitude"></div>
             <details class="formula-raw">
@@ -366,7 +409,7 @@ HTML_PAGE = """<!doctype html>
               <pre id="diagram-amplitude-raw"></pre>
             </details>
           </div>
-          <div class="formula-block">
+          <div class="formula-block" id="total-amplitude-block">
             <h3>Total amplitude</h3>
             <div class="formula-math" id="total-amplitude"></div>
             <details class="formula-raw">
@@ -380,12 +423,19 @@ HTML_PAGE = """<!doctype html>
   </main>
   <script>
     const controls = document.getElementById("controls");
+    const modeQedButton = document.getElementById("mode-qed");
+    const modeCustomButton = document.getElementById("mode-custom");
     const reactionInput = document.getElementById("reaction");
     const orderInput = document.getElementById("order");
     const layoutInput = document.getElementById("layout");
     const momentaInput = document.getElementById("show-momenta");
     const legIdsInput = document.getElementById("show-leg-ids");
     const ruleHighlightsInput = document.getElementById("show-rule-highlights");
+    const customTheoryFieldEl = document.getElementById("custom-theory-field");
+    const customTheoryInput = document.getElementById("custom-theory");
+    const qedConfigEl = document.getElementById("qed-config");
+    const qedExamplesEl = document.getElementById("qed-examples");
+    const customExamplesEl = document.getElementById("custom-examples");
     const statusEl = document.getElementById("status");
     const notesEl = document.getElementById("notes");
     const viewerEl = document.getElementById("viewer");
@@ -401,9 +451,12 @@ HTML_PAGE = """<!doctype html>
     const totalAmplitudeEl = document.getElementById("total-amplitude");
     const diagramAmplitudeRawEl = document.getElementById("diagram-amplitude-raw");
     const totalAmplitudeRawEl = document.getElementById("total-amplitude-raw");
+    const diagramAmplitudeBlockEl = document.getElementById("diagram-amplitude-block");
+    const totalAmplitudeBlockEl = document.getElementById("total-amplitude-block");
 
     let currentPayload = null;
     let currentIndex = 0;
+    let currentMode = "qed";
 
     function setStatus(message, isError=false){
       statusEl.textContent = message;
@@ -457,6 +510,9 @@ HTML_PAGE = """<!doctype html>
       stageEl.innerHTML = diagram.svg;
       const diagramFormula = ruleHighlightsInput.checked ? (diagram.annotated_amplitude || diagram.amplitude) : diagram.amplitude;
       const totalFormula = ruleHighlightsInput.checked ? (currentPayload.total_annotated_amplitude || currentPayload.total_amplitude) : currentPayload.total_amplitude;
+      const showAmplitudeBlocks = Boolean((diagram.amplitude && diagram.amplitude.trim()) || (currentPayload.total_amplitude && currentPayload.total_amplitude.trim()));
+      diagramAmplitudeBlockEl.classList.toggle("hidden", !showAmplitudeBlocks);
+      totalAmplitudeBlockEl.classList.toggle("hidden", !showAmplitudeBlocks);
       setFormula(
         diagramAmplitudeEl,
         diagramAmplitudeRawEl,
@@ -483,6 +539,24 @@ HTML_PAGE = """<!doctype html>
       typesetMath();
     }
 
+    function setMode(mode){
+      currentMode = mode;
+      const custom = mode === "custom";
+      modeQedButton.classList.toggle("active", !custom);
+      modeCustomButton.classList.toggle("active", custom);
+      customTheoryFieldEl.classList.toggle("hidden", !custom);
+      qedConfigEl.classList.toggle("hidden", custom);
+      qedExamplesEl.classList.toggle("hidden", custom);
+      customExamplesEl.classList.toggle("hidden", !custom);
+      ruleHighlightsInput.parentElement.classList.toggle("hidden", custom);
+      if(custom){
+        orderInput.value = "tree";
+        reactionInput.value = "e+ + e- -> 2phi";
+      } else if (reactionInput.value === "e+ + e- -> 2phi") {
+        reactionInput.value = "e- + e+ -> mu- + mu+";
+      }
+    }
+
     function renderResponse(payload){
       currentPayload = payload;
       renderNotes(payload.notes);
@@ -492,12 +566,16 @@ HTML_PAGE = """<!doctype html>
 
     async function generate(){
       const params = new URLSearchParams({
+        mode: currentMode,
         reaction: reactionInput.value,
         order: orderInput.value,
         compact: layoutInput.value === "compact" ? "1" : "0",
         show_leg_ids: legIdsInput.checked ? "1" : "0",
         show_momenta: momentaInput.checked ? "1" : "0"
       });
+      if(currentMode === "custom"){
+        params.set("theory", customTheoryInput.value);
+      }
       setStatus("Generating...");
       notesEl.innerHTML = "";
       viewerEl.hidden = true;
@@ -535,15 +613,20 @@ HTML_PAGE = """<!doctype html>
 
     document.querySelectorAll(".example").forEach((button) => {
       button.addEventListener("click", () => {
+        setMode(button.dataset.mode || "qed");
         reactionInput.value = button.dataset.reaction;
         orderInput.value = button.dataset.order || "tree";
         generate();
       });
     });
+
+    modeQedButton.addEventListener("click", () => setMode("qed"));
+    modeCustomButton.addEventListener("click", () => setMode("custom"));
   </script>
 </body>
 </html>
 """
+HTML_PAGE = HTML_PAGE.replace("__CUSTOM_THEORY__", DEFAULT_CUSTOM_THEORY)
 
 
 class DiagramHandler(BaseHTTPRequestHandler):
@@ -562,23 +645,32 @@ class DiagramHandler(BaseHTTPRequestHandler):
 
     def _handle_generate(self, query: str) -> None:
         params = parse_qs(query)
+        mode = params.get("mode", ["qed"])[0]
         reaction = params.get("reaction", [""])[0]
         order = params.get("order", ["tree"])[0]
         compact = params.get("compact", ["0"])[0] == "1"
         show_leg_ids = params.get("show_leg_ids", ["0"])[0] == "1"
         show_momenta = params.get("show_momenta", ["1"])[0] == "1"
+        theory_text = params.get("theory", [DEFAULT_CUSTOM_THEORY])[0]
 
         try:
-            bundle = generate_diagrams(reaction, order=order)
-            amplitude = generate_symbolic_amplitudes(reaction, order="tree") if order == "tree" else None
+            if mode == "custom":
+                theory, bundle = generate_custom_theory_diagrams(theory_text, reaction)
+                amplitude = None
+            else:
+                theory = None
+                bundle = generate_diagrams(reaction, order=order)
+                amplitude = generate_symbolic_amplitudes(reaction, order="tree") if order == "tree" else None
             options = RenderOptions(
                 compact=compact,
                 show_leg_ids=show_leg_ids,
                 show_momenta=show_momenta,
             )
             payload = {
+                "mode": mode,
                 "reaction": bundle.reaction.raw,
                 "order": bundle.order,
+                "theory_name": theory.name if theory else "QED",
                 "notes": list(bundle.notes),
                 "total_amplitude": amplitude.total_expression if amplitude else "",
                 "total_annotated_amplitude": amplitude.total_annotated_expression if amplitude else "",
