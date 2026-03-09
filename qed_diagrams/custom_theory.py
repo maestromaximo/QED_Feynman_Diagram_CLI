@@ -13,9 +13,9 @@ REACTION_SPLIT_RE = re.compile(r"\s*(?:->|=>)\s*")
 DEFAULT_CUSTOM_THEORY = """{
   "name": "Electron-pseudoscalar Yukawa theory",
   "particles": [
-    {"token": "e-", "label": "e-", "kind": "fermion", "family": "electron", "charge": -1, "anti": false},
-    {"token": "e+", "label": "e+", "kind": "fermion", "family": "electron", "charge": 1, "anti": true},
-    {"token": "phi", "label": "φ", "kind": "scalar", "family": "phi", "charge": 0}
+    {"token": "e-", "label": "e-", "kind": "fermion", "family": "electron", "charge": -1, "anti": false, "mass_symbol": "m_e"},
+    {"token": "e+", "label": "e+", "kind": "fermion", "family": "electron", "charge": 1, "anti": true, "mass_symbol": "m_e"},
+    {"token": "phi", "label": "φ", "kind": "scalar", "family": "phi", "charge": 0, "mass_symbol": "0"}
   ],
   "vertices": [
     {"name": "e-e+phi", "fields": ["e-", "e+", "phi"], "factor": "i g \\\\gamma^5"}
@@ -30,6 +30,7 @@ class TheoryParticle:
     kind: str
     family: str | None
     charge: int
+    mass_symbol: str | None = None
     anti: bool = False
 
 
@@ -45,6 +46,25 @@ class CustomTheory:
     name: str
     particles: dict[str, TheoryParticle]
     vertices: tuple[TheoryVertex, ...]
+
+
+@dataclass(frozen=True)
+class CustomAmplitudeTerm:
+    index: int
+    label: str
+    sign: int
+    expression: str
+    annotated_expression: str
+
+
+@dataclass(frozen=True)
+class CustomSymbolicAmplitude:
+    reaction: str
+    order: str
+    terms: tuple[CustomAmplitudeTerm, ...]
+    total_expression: str
+    total_annotated_expression: str
+    notes: tuple[str, ...]
 
 
 def generate_custom_theory_diagrams(theory_text: str, reaction_raw: str) -> tuple[CustomTheory, DiagramBundle]:
@@ -66,8 +86,6 @@ def generate_custom_theory_diagrams(theory_text: str, reaction_raw: str) -> tupl
         f"Theory: {theory.name}",
         "Custom-theory mode currently builds connected tree-level 2->2 diagrams from two 3-point vertices.",
     ]
-    if any(vertex.factor for vertex in theory.vertices):
-        notes.append("Vertex factors are stored from the theory definition, but custom symbolic amplitudes are not implemented yet.")
     return theory, DiagramBundle(reaction=reaction, order="tree", diagrams=diagrams, notes=tuple(notes))
 
 
@@ -105,6 +123,7 @@ def parse_custom_theory(theory_text: str) -> CustomTheory:
             kind=kind,
             family=(str(entry.get("family")).strip() if entry.get("family") is not None else None),
             charge=int(entry.get("charge", 0)),
+            mass_symbol=(str(entry.get("mass_symbol")).strip() if entry.get("mass_symbol") is not None else None),
             anti=bool(entry.get("anti", False)),
         )
 
@@ -132,6 +151,29 @@ def parse_custom_theory(theory_text: str) -> CustomTheory:
         particles=particles,
         vertices=tuple(vertices),
     )
+
+
+def generate_custom_symbolic_amplitudes(
+    theory_text: str,
+    reaction_raw: str,
+) -> tuple[CustomTheory, DiagramBundle, CustomSymbolicAmplitude]:
+    theory, bundle = generate_custom_theory_diagrams(theory_text, reaction_raw)
+    terms = tuple(
+        _custom_amplitude_term(theory, bundle, diagram)
+        for diagram in bundle.diagrams
+    )
+    amplitude = CustomSymbolicAmplitude(
+        reaction=bundle.reaction.raw,
+        order=bundle.order,
+        terms=terms,
+        total_expression=_custom_total_expression(terms),
+        total_annotated_expression=_custom_total_expression(terms),
+        notes=(
+            "Custom-theory amplitudes are unsimplified tree-level expressions built from the supplied vertex factors.",
+            "They currently assume connected 2->2 diagrams composed of two 3-point vertices.",
+        ),
+    )
+    return theory, bundle, amplitude
 
 
 def parse_custom_reaction(theory: CustomTheory, raw: str) -> Reaction:
@@ -358,3 +400,235 @@ def _topology_for_kind(kind: str) -> str:
 def _channel_rank(channel: str | None) -> int:
     ordering = {None: 9, "s": 0, "t": 1, "u": 2}
     return ordering.get(channel, 8)
+
+
+def _custom_amplitude_term(
+    theory: CustomTheory,
+    bundle: DiagramBundle,
+    diagram: Diagram,
+) -> CustomAmplitudeTerm:
+    term = CustomAmplitudeTerm(
+        index=diagram.index,
+        label=diagram.channel or str(diagram.index),
+        sign=1,
+        expression=_custom_diagram_expression(theory, bundle, diagram),
+        annotated_expression="",
+    )
+    return CustomAmplitudeTerm(
+        index=term.index,
+        label=term.label,
+        sign=term.sign,
+        expression=term.expression,
+        annotated_expression=term.expression,
+    )
+
+
+def _custom_diagram_expression(
+    theory: CustomTheory,
+    bundle: DiagramBundle,
+    diagram: Diagram,
+) -> str:
+    if diagram.topology == "fermion_exchange":
+        return _custom_fermion_exchange_expression(theory, bundle, diagram)
+    if diagram.topology in {"scalar_exchange", "vector_exchange"}:
+        return _custom_boson_exchange_expression(theory, bundle, diagram)
+    raise DiagramGenerationError(f"Unsupported custom-theory topology for amplitudes: {diagram.topology}.")
+
+
+def _custom_fermion_exchange_expression(
+    theory: CustomTheory,
+    bundle: DiagramBundle,
+    diagram: Diagram,
+) -> str:
+    legs = {leg.identifier: leg for leg in bundle.reaction.all_legs}
+    vertex_a_legs = tuple(legs[leg_id] for leg_id in diagram.vertex_a)
+    vertex_b_legs = tuple(legs[leg_id] for leg_id in diagram.vertex_b)
+    vertex_a = _resolve_custom_vertex(theory, diagram, vertex_a_legs)
+    vertex_b = _resolve_custom_vertex(theory, diagram, vertex_b_legs)
+    away = next(leg for leg in bundle.reaction.charged_legs if leg.arrow_toward_vertex is False)
+    toward = next(leg for leg in bundle.reaction.charged_legs if leg.arrow_toward_vertex is True)
+    away_vertex = vertex_a if away.identifier in diagram.vertex_a else vertex_b
+    toward_vertex = vertex_a if toward.identifier in diagram.vertex_a else vertex_b
+    q = _latex_momentum(diagram.internal_momentum)
+    external_factors = " ".join(
+        _custom_external_factor(leg, index)
+        for leg, index in zip(
+            [leg for leg in bundle.reaction.all_legs if leg.particle.kind in {"vector", "photon"}],
+            [r"\alpha", r"\beta", r"\mu", r"\nu"],
+        )
+        if _custom_external_factor(leg, index)
+    )
+    chain = (
+        r"\left["
+        + _custom_fermion_wavefunction(away)
+        + " "
+        + _vertex_factor_latex(away_vertex)
+        + " "
+        + _custom_propagator(theory, diagram.internal_particle, q)
+        + " "
+        + _vertex_factor_latex(toward_vertex)
+        + " "
+        + _custom_fermion_wavefunction(toward)
+        + r"\right]"
+    )
+    delta_a = _custom_vertex_delta(vertex_a_legs, diagram.internal_momentum, internal_enters=False)
+    delta_b = _custom_vertex_delta(vertex_b_legs, diagram.internal_momentum, internal_enters=True)
+    pieces = []
+    if external_factors:
+        pieces.append(external_factors)
+    pieces.append(r"\int \frac{d^4 " + q + r"}{(2\pi)^4}")
+    pieces.append(chain)
+    pieces.append(rf"(2\pi)^4 \delta^{{(4)}}\!\left({delta_b}\right)")
+    pieces.append(rf"(2\pi)^4 \delta^{{(4)}}\!\left({delta_a}\right)")
+    return " ".join(pieces)
+
+
+def _custom_boson_exchange_expression(
+    theory: CustomTheory,
+    bundle: DiagramBundle,
+    diagram: Diagram,
+) -> str:
+    legs = {leg.identifier: leg for leg in bundle.reaction.all_legs}
+    vertex_a_legs = tuple(legs[leg_id] for leg_id in diagram.vertex_a)
+    vertex_b_legs = tuple(legs[leg_id] for leg_id in diagram.vertex_b)
+    vertex_a = _resolve_custom_vertex(theory, diagram, vertex_a_legs)
+    vertex_b = _resolve_custom_vertex(theory, diagram, vertex_b_legs)
+    q = _latex_momentum(diagram.internal_momentum)
+    left = _custom_vertex_external_product(vertex_a_legs, vertex_a)
+    right = _custom_vertex_external_product(vertex_b_legs, vertex_b)
+    delta_a = _custom_vertex_delta(vertex_a_legs, diagram.internal_momentum, internal_enters=False)
+    delta_b = _custom_vertex_delta(vertex_b_legs, diagram.internal_momentum, internal_enters=True)
+    return " ".join(
+        [
+            r"\int \frac{d^4 " + q + r"}{(2\pi)^4}",
+            left,
+            _custom_propagator(theory, diagram.internal_particle, q),
+            right,
+            rf"(2\pi)^4 \delta^{{(4)}}\!\left({delta_b}\right)",
+            rf"(2\pi)^4 \delta^{{(4)}}\!\left({delta_a}\right)",
+        ]
+    )
+
+
+def _resolve_custom_vertex(
+    theory: CustomTheory,
+    diagram: Diagram,
+    group: tuple[ExternalLeg, ExternalLeg],
+) -> TheoryVertex:
+    matches = _group_vertex_matches(theory, group)
+    internal_particle = theory.particles[diagram.internal_particle]
+    for vertex, missing in matches:
+        missing_particle = theory.particles[missing]
+        if missing_particle.kind != internal_particle.kind:
+            continue
+        if missing_particle.kind == "fermion":
+            if missing_particle.family == internal_particle.family:
+                return vertex
+            continue
+        if missing_particle.token == internal_particle.token:
+            return vertex
+    raise DiagramGenerationError("Could not resolve the matching custom vertex for a generated diagram.")
+
+
+def _custom_vertex_external_product(
+    group: tuple[ExternalLeg, ExternalLeg],
+    vertex: TheoryVertex,
+) -> str:
+    factors = [_custom_external_factor(leg, r"\mu" if position == 0 else r"\nu") for position, leg in enumerate(group)]
+    factors = [factor for factor in factors if factor]
+    factor = _vertex_factor_latex(vertex)
+    if factors:
+        return r"\left[" + " ".join(factors + [factor]) + r"\right]"
+    return r"\left[" + factor + r"\right]"
+
+
+def _custom_external_factor(leg: ExternalLeg, index: str) -> str:
+    if leg.particle.kind == "fermion":
+        return _custom_fermion_wavefunction(leg)
+    if leg.particle.kind in {"vector", "photon"}:
+        momentum = _latex_momentum(leg.momentum_label)
+        if leg.side == "incoming":
+            return rf"\varepsilon_{{{index}}}\!\left({momentum}\right)"
+        return rf"\varepsilon_{{{index}}}^{{*}}\!\left({momentum}\right)"
+    return ""
+
+
+def _custom_fermion_wavefunction(leg: ExternalLeg) -> str:
+    spin = f"i_{{{leg.slot}}}" + ("'" if leg.side == "outgoing" else "")
+    momentum = _latex_momentum(leg.momentum_label)
+    if not leg.particle.anti and leg.side == "incoming":
+        return rf"u^{{({spin})}}\!\left({momentum}\right)"
+    if not leg.particle.anti and leg.side == "outgoing":
+        return rf"\bar{{u}}^{{({spin})}}\!\left({momentum}\right)"
+    if leg.particle.anti and leg.side == "incoming":
+        return rf"\bar{{v}}^{{({spin})}}\!\left({momentum}\right)"
+    return rf"v^{{({spin})}}\!\left({momentum}\right)"
+
+
+def _vertex_factor_latex(vertex: TheoryVertex) -> str:
+    return vertex.factor or rf"g_{{{vertex.name}}}"
+
+
+def _custom_propagator(theory: CustomTheory, token: str, q: str) -> str:
+    particle = theory.particles[token]
+    mass = _custom_mass_symbol(particle)
+    if particle.kind == "fermion":
+        return rf"\left(\frac{{i (\gamma \cdot {q} + {mass})}}{{{q}^2 - {mass}^2}}\right)"
+    if particle.kind == "scalar":
+        if mass == "0":
+            return rf"\left(\frac{{i}}{{{q}^2}}\right)"
+        return rf"\left(\frac{{i}}{{{q}^2 - {mass}^2}}\right)"
+    if mass == "0":
+        return rf"\left(\frac{{-i g_{{\mu \nu}}}}{{{q}^2}}\right)"
+    return rf"\left(\frac{{-i g_{{\mu \nu}}}}{{{q}^2 - {mass}^2}}\right)"
+
+
+def _custom_mass_symbol(particle: TheoryParticle) -> str:
+    if particle.mass_symbol:
+        return particle.mass_symbol
+    return "m_" + particle.token.replace("+", "plus").replace("-", "minus")
+
+
+def _custom_vertex_delta(
+    group: tuple[ExternalLeg, ExternalLeg],
+    internal_momentum: str,
+    *,
+    internal_enters: bool,
+) -> str:
+    terms = []
+    for leg in group:
+        sign = "+" if leg.side == "incoming" else "-"
+        terms.append((sign, _latex_momentum(leg.momentum_label)))
+    terms.append(("+" if internal_enters else "-", _latex_momentum(internal_momentum)))
+    return _format_signed_terms(terms)
+
+
+def _format_signed_terms(terms: list[tuple[str, str]]) -> str:
+    pieces = []
+    for position, (sign, term) in enumerate(terms):
+        if position == 0:
+            pieces.append(term if sign == "+" else f"- {term}")
+            continue
+        pieces.append(f"{sign} {term}")
+    return " ".join(pieces)
+
+
+def _custom_total_expression(terms: tuple[CustomAmplitudeTerm, ...]) -> str:
+    pieces = [r"-i \mathcal{M} = "]
+    for position, term in enumerate(terms):
+        piece = rf"\left(-i \mathcal{{M}}_{{{term.label}}}\right)"
+        if position == 0:
+            pieces.append(piece)
+        else:
+            pieces.append(" + " + piece if term.sign > 0 else " - " + piece)
+    return "".join(pieces)
+
+
+def _latex_momentum(label: str) -> str:
+    if label.startswith("p") and label.endswith("'"):
+        return rf"p_{{{label[1:-1]}}}'"
+    if label.startswith("p"):
+        return rf"p_{{{label[1:]}}}"
+    if label.startswith("q"):
+        return rf"q_{{{label[1:]}}}"
+    return label

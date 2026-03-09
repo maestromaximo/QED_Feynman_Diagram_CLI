@@ -4,7 +4,11 @@ import unittest
 
 from qed_diagrams.amplitude import generate_symbolic_amplitudes
 from qed_diagrams.core import DiagramGenerationError, generate_diagrams
-from qed_diagrams.custom_theory import DEFAULT_CUSTOM_THEORY, generate_custom_theory_diagrams
+from qed_diagrams.custom_theory import (
+    DEFAULT_CUSTOM_THEORY,
+    generate_custom_symbolic_amplitudes,
+    generate_custom_theory_diagrams,
+)
 from qed_diagrams.render import render_diagram_svg
 from qed_diagrams.web import HTML_PAGE
 
@@ -96,6 +100,15 @@ class DiagramGeneratorTests(unittest.TestCase):
         self.assertEqual(theory.name, "Electron-pseudoscalar Yukawa theory")
         self.assertEqual([diagram.channel for diagram in bundle.diagrams], ["t", "u"])
         self.assertTrue(all(diagram.topology == "fermion_exchange" for diagram in bundle.diagrams))
+
+    def test_custom_theory_yukawa_example_generates_symbolic_amplitudes(self) -> None:
+        theory, bundle, amplitude = generate_custom_symbolic_amplitudes(DEFAULT_CUSTOM_THEORY, "e+ + e- -> 2phi")
+        self.assertEqual(theory.name, "Electron-pseudoscalar Yukawa theory")
+        self.assertEqual([term.label for term in amplitude.terms], ["t", "u"])
+        self.assertIn(r"\bar{v}^{(i_{1})}\!\left(p_{1}\right)", amplitude.terms[0].expression)
+        self.assertIn(r"i g \gamma^5", amplitude.terms[0].expression)
+        self.assertIn(r"\frac{i (\gamma \cdot q_{1} + m_e)}{q_{1}^2 - m_e^2}", amplitude.terms[0].expression)
+        self.assertIn(r"-i \mathcal{M} = \left(-i \mathcal{M}_{t}\right) + \left(-i \mathcal{M}_{u}\right)", amplitude.total_expression)
 
     def test_custom_theory_html_includes_custom_mode(self) -> None:
         self.assertIn("Custom theory", HTML_PAGE)

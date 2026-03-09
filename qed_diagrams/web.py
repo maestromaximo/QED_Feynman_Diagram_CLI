@@ -8,7 +8,7 @@ from urllib.parse import parse_qs, urlparse
 
 from .amplitude import generate_symbolic_amplitudes
 from .core import DiagramGenerationError, generate_diagrams
-from .custom_theory import DEFAULT_CUSTOM_THEORY, generate_custom_theory_diagrams
+from .custom_theory import DEFAULT_CUSTOM_THEORY, generate_custom_symbolic_amplitudes, generate_custom_theory_diagrams
 from .render import RenderOptions, render_diagram_svg
 
 
@@ -655,8 +655,7 @@ class DiagramHandler(BaseHTTPRequestHandler):
 
         try:
             if mode == "custom":
-                theory, bundle = generate_custom_theory_diagrams(theory_text, reaction)
-                amplitude = None
+                theory, bundle, amplitude = generate_custom_symbolic_amplitudes(theory_text, reaction)
             else:
                 theory = None
                 bundle = generate_diagrams(reaction, order=order)

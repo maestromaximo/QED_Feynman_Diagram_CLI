@@ -96,6 +96,7 @@ The custom-theory workspace currently supports:
 - user-defined particles in JSON,
 - user-defined 3-point interaction vertices,
 - connected tree-level `2 -> 2` diagram generation from two vertices,
+- unsimplified symbolic tree-level amplitudes built from the supplied vertex factors,
 - fermion, scalar, and vector line styles.
 
 The default custom example is the Yukawa-like theory:
@@ -111,10 +112,10 @@ That lets you generate the expected lowest-order diagrams for:
 
 Current boundary for custom theories:
 
-- diagrams only,
 - tree-level `2 -> 2` only,
 - 3-point vertices only,
-- no custom symbolic amplitudes yet.
+- no spin sums, traces, or cross-section calculations yet,
+- no custom rule-source highlighting yet.
 
 ## Run The Browser UI
 
