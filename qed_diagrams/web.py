@@ -1,0 +1,510 @@
+from __future__ import annotations
+
+from http import HTTPStatus
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import json
+import re
+from urllib.parse import parse_qs, urlparse
+
+from .core import DiagramGenerationError, generate_diagrams
+from .render import RenderOptions, render_diagram_svg
+
+
+HTML_PAGE = """<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>QED Diagram Editor</title>
+  <style>
+    :root{
+      --ink:#1f2a1f;
+      --accent:#8f2d1b;
+      --paper:#f7f1e1;
+      --panel:#fffdf5;
+      --line:#d6c7a3;
+      --muted:#4a5647;
+      --shadow:0 22px 60px rgba(79,57,18,.08);
+    }
+    *{box-sizing:border-box}
+    body{
+      margin:0;
+      min-height:100vh;
+      font-family:'Trebuchet MS','Segoe UI',sans-serif;
+      color:var(--ink);
+      background:
+        radial-gradient(circle at top left, rgba(143,45,27,.16), transparent 24%),
+        radial-gradient(circle at bottom right, rgba(31,42,31,.12), transparent 24%),
+        linear-gradient(180deg, #ede2c3 0%, var(--paper) 100%);
+    }
+    main{max-width:1280px;margin:0 auto;padding:36px 20px 72px}
+    h1{
+      margin:0 0 12px;
+      font:700 clamp(2.4rem,4vw,4.6rem) 'Iowan Old Style','Palatino Linotype','Book Antiqua',Palatino,serif;
+      letter-spacing:-.04em;
+    }
+    .lede{
+      max-width:820px;
+      margin:0 0 28px;
+      color:var(--muted);
+      font-size:1.05rem;
+      line-height:1.6;
+    }
+    .shell{
+      display:grid;
+      grid-template-columns:minmax(300px,360px) minmax(0,1fr);
+      gap:22px;
+      align-items:start;
+    }
+    .card{
+      border:1px solid var(--line);
+      border-radius:28px;
+      background:rgba(255,253,245,.92);
+      box-shadow:var(--shadow);
+      backdrop-filter:blur(10px);
+    }
+    .controls{padding:24px}
+    .controls label{
+      display:block;
+      margin-bottom:10px;
+      font-weight:700;
+      letter-spacing:.06em;
+      text-transform:uppercase;
+      font-size:.76rem;
+      color:var(--accent);
+    }
+    input[type=text], select{
+      width:100%;
+      padding:14px 16px;
+      border-radius:16px;
+      border:1px solid var(--line);
+      background:#fff;
+      font-size:1rem;
+      color:var(--ink);
+    }
+    .field{margin-bottom:16px}
+    .row{
+      display:grid;
+      grid-template-columns:repeat(2, minmax(0,1fr));
+      gap:12px;
+      margin-bottom:18px;
+    }
+    .toggles{
+      display:flex;
+      flex-direction:column;
+      gap:10px;
+      margin:18px 0 20px;
+    }
+    .toggles label{
+      margin:0;
+      display:flex;
+      gap:10px;
+      align-items:center;
+      font-weight:600;
+      text-transform:none;
+      letter-spacing:0;
+      color:var(--muted);
+      font-size:.95rem;
+    }
+    button{
+      border:0;
+      border-radius:16px;
+      padding:14px 18px;
+      font:700 1rem 'Trebuchet MS','Segoe UI',sans-serif;
+      cursor:pointer;
+      color:#fff;
+      background:linear-gradient(135deg, #8f2d1b 0%, #bf5c26 100%);
+      box-shadow:0 10px 22px rgba(143,45,27,.24);
+    }
+    button:disabled{
+      opacity:.45;
+      cursor:not-allowed;
+      box-shadow:none;
+    }
+    .ghost{
+      background:#fff;
+      color:var(--ink);
+      border:1px solid var(--line);
+      box-shadow:none;
+    }
+    .examples{
+      margin-top:20px;
+      display:flex;
+      flex-wrap:wrap;
+      gap:10px;
+    }
+    .example{
+      border:1px solid var(--line);
+      background:#fff;
+      color:var(--ink);
+      box-shadow:none;
+      padding:10px 12px;
+      font-size:.92rem;
+      border-radius:999px;
+    }
+    .results{padding:26px}
+    .status{
+      min-height:24px;
+      margin-bottom:14px;
+      color:var(--muted);
+    }
+    .error{
+      color:#8a1f1f;
+      font-weight:700;
+    }
+    .notes{
+      display:grid;
+      gap:10px;
+      margin-bottom:18px;
+    }
+    .note{
+      margin:0;
+      padding:12px 14px;
+      border-radius:16px;
+      background:#fbf6e8;
+      color:var(--muted);
+      line-height:1.5;
+      border:1px solid rgba(214,199,163,.75);
+    }
+    .viewer{
+      border:1px solid var(--line);
+      border-radius:24px;
+      background:#fffdfa;
+      padding:20px;
+    }
+    .viewer-head{
+      display:flex;
+      justify-content:space-between;
+      gap:18px;
+      align-items:start;
+      margin-bottom:18px;
+    }
+    .kicker{
+      margin:0 0 6px;
+      color:var(--accent);
+      font:700 .76rem 'Trebuchet MS','Segoe UI',sans-serif;
+      letter-spacing:.1em;
+      text-transform:uppercase;
+    }
+    .viewer h2{
+      margin:0 0 8px;
+      font:700 1.9rem 'Iowan Old Style','Palatino Linotype','Book Antiqua',Palatino,serif;
+    }
+    .viewer p{
+      margin:0;
+      color:var(--muted);
+      line-height:1.5;
+      max-width:760px;
+    }
+    .carousel-nav{
+      display:flex;
+      gap:10px;
+      flex-shrink:0;
+    }
+    .stage-wrap{
+      padding:14px;
+      border-radius:26px;
+      background:
+        radial-gradient(circle at top left, rgba(143,45,27,.08), transparent 26%),
+        linear-gradient(180deg, #f7efd9 0%, #fbf7ea 100%);
+      border:1px solid rgba(214,199,163,.75);
+    }
+    .stage{
+      min-height:520px;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+    }
+    .stage svg{
+      max-width:100%;
+      height:auto;
+      display:block;
+    }
+    .actions{
+      margin-top:16px;
+      display:flex;
+      justify-content:space-between;
+      gap:12px;
+      align-items:center;
+      flex-wrap:wrap;
+    }
+    .counter{
+      color:var(--muted);
+      font-size:.95rem;
+      font-weight:600;
+    }
+    @media (max-width: 980px){
+      .shell{grid-template-columns:1fr}
+      .row{grid-template-columns:1fr}
+      .viewer-head{flex-direction:column}
+      .stage{min-height:0}
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>QED Diagram Editor</h1>
+    <p class="lede">
+      Generate lowest-order and selected one-loop QED diagrams with explicit particle and momentum labels.
+      The viewer keeps one large stage active at a time so the diagram can breathe instead of being squeezed into a stacked list.
+    </p>
+    <section class="shell">
+      <form class="card controls" id="controls">
+        <div class="field">
+          <label for="reaction">Reaction</label>
+          <input id="reaction" name="reaction" type="text" value="e- + e+ -> mu- + mu+" spellcheck="false">
+        </div>
+        <div class="row">
+          <div class="field">
+            <label for="order">Perturbative order</label>
+            <select id="order" name="order">
+              <option value="tree">Tree level</option>
+              <option value="one-loop">One loop</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="layout">Layout</label>
+            <select id="layout" name="layout">
+              <option value="roomy">Roomy</option>
+              <option value="compact">Compact</option>
+            </select>
+          </div>
+        </div>
+        <div class="toggles">
+          <label><input id="show-momenta" type="checkbox" checked> Show momentum labels</label>
+          <label><input id="show-leg-ids" type="checkbox"> Show leg ids</label>
+        </div>
+        <button type="submit">Generate diagrams</button>
+        <div class="examples">
+          <button class="example" type="button" data-reaction="e- + mu- -> e- + mu-" data-order="tree">e- + mu- -&gt; e- + mu-</button>
+          <button class="example" type="button" data-reaction="e- + e+ -> e- + e+" data-order="one-loop">e- + e+ -&gt; e- + e+ (loop)</button>
+          <button class="example" type="button" data-reaction="e- + gamma -> e- + gamma" data-order="tree">e- + gamma -&gt; e- + gamma</button>
+          <button class="example" type="button" data-reaction="e- + e+ -> gamma + gamma" data-order="tree">e- + e+ -&gt; gamma + gamma</button>
+        </div>
+      </form>
+      <section class="card results">
+        <div class="status" id="status">Enter a supported QED reaction and choose the order you want to inspect.</div>
+        <div class="notes" id="notes"></div>
+        <section class="viewer" id="viewer" hidden>
+          <div class="viewer-head">
+            <div>
+              <p class="kicker" id="diagram-kicker"></p>
+              <h2 id="diagram-title"></h2>
+              <p id="diagram-description"></p>
+            </div>
+            <div class="carousel-nav">
+              <button class="ghost" type="button" id="prev-button">Previous</button>
+              <button class="ghost" type="button" id="next-button">Next</button>
+            </div>
+          </div>
+          <div class="stage-wrap">
+            <div class="stage" id="stage"></div>
+          </div>
+          <div class="actions">
+            <div class="counter" id="diagram-counter"></div>
+            <button class="ghost" type="button" id="download-button">Download SVG</button>
+          </div>
+        </section>
+      </section>
+    </section>
+  </main>
+  <script>
+    const controls = document.getElementById("controls");
+    const reactionInput = document.getElementById("reaction");
+    const orderInput = document.getElementById("order");
+    const layoutInput = document.getElementById("layout");
+    const momentaInput = document.getElementById("show-momenta");
+    const legIdsInput = document.getElementById("show-leg-ids");
+    const statusEl = document.getElementById("status");
+    const notesEl = document.getElementById("notes");
+    const viewerEl = document.getElementById("viewer");
+    const diagramKickerEl = document.getElementById("diagram-kicker");
+    const diagramTitleEl = document.getElementById("diagram-title");
+    const diagramDescriptionEl = document.getElementById("diagram-description");
+    const diagramCounterEl = document.getElementById("diagram-counter");
+    const stageEl = document.getElementById("stage");
+    const prevButton = document.getElementById("prev-button");
+    const nextButton = document.getElementById("next-button");
+    const downloadButton = document.getElementById("download-button");
+
+    let currentPayload = null;
+    let currentIndex = 0;
+
+    function setStatus(message, isError=false){
+      statusEl.textContent = message;
+      statusEl.className = isError ? "status error" : "status";
+    }
+
+    function renderNotes(notes){
+      notesEl.innerHTML = "";
+      notes.forEach((note) => {
+        const p = document.createElement("p");
+        p.className = "note";
+        p.textContent = note;
+        notesEl.appendChild(p);
+      });
+    }
+
+    function renderDiagram(index){
+      if(!currentPayload || !currentPayload.diagrams.length){
+        viewerEl.hidden = true;
+        return;
+      }
+      currentIndex = index;
+      const diagram = currentPayload.diagrams[currentIndex];
+      viewerEl.hidden = false;
+      diagramKickerEl.textContent = `${currentPayload.order} order`;
+      diagramTitleEl.textContent = diagram.title;
+      diagramDescriptionEl.textContent = diagram.description;
+      diagramCounterEl.textContent = `Diagram ${currentIndex + 1} of ${currentPayload.diagrams.length}`;
+      stageEl.innerHTML = diagram.svg;
+      prevButton.disabled = currentPayload.diagrams.length === 1;
+      nextButton.disabled = currentPayload.diagrams.length === 1;
+      downloadButton.onclick = () => {
+        const blob = new Blob([diagram.svg], {type: "image/svg+xml"});
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = diagram.filename;
+        link.click();
+        URL.revokeObjectURL(url);
+      };
+    }
+
+    function renderResponse(payload){
+      currentPayload = payload;
+      renderNotes(payload.notes);
+      renderDiagram(0);
+      setStatus(`Generated ${payload.diagrams.length} diagram${payload.diagrams.length === 1 ? "" : "s"} for ${payload.reaction} at ${payload.order} order.`);
+    }
+
+    async function generate(){
+      const params = new URLSearchParams({
+        reaction: reactionInput.value,
+        order: orderInput.value,
+        compact: layoutInput.value === "compact" ? "1" : "0",
+        show_leg_ids: legIdsInput.checked ? "1" : "0",
+        show_momenta: momentaInput.checked ? "1" : "0"
+      });
+      setStatus("Generating...");
+      notesEl.innerHTML = "";
+      viewerEl.hidden = true;
+      stageEl.innerHTML = "";
+      const response = await fetch(`/api/generate?${params.toString()}`);
+      const payload = await response.json();
+      if(!response.ok){
+        currentPayload = null;
+        setStatus(payload.error, true);
+        return;
+      }
+      renderResponse(payload);
+    }
+
+    controls.addEventListener("submit", (event) => {
+      event.preventDefault();
+      generate();
+    });
+
+    prevButton.addEventListener("click", () => {
+      if(!currentPayload){ return; }
+      renderDiagram((currentIndex - 1 + currentPayload.diagrams.length) % currentPayload.diagrams.length);
+    });
+
+    nextButton.addEventListener("click", () => {
+      if(!currentPayload){ return; }
+      renderDiagram((currentIndex + 1) % currentPayload.diagrams.length);
+    });
+
+    document.querySelectorAll(".example").forEach((button) => {
+      button.addEventListener("click", () => {
+        reactionInput.value = button.dataset.reaction;
+        orderInput.value = button.dataset.order || "tree";
+        generate();
+      });
+    });
+  </script>
+</body>
+</html>
+"""
+
+
+class DiagramHandler(BaseHTTPRequestHandler):
+    def do_GET(self) -> None:
+        parsed = urlparse(self.path)
+        if parsed.path == "/":
+            self._send_html(HTML_PAGE)
+            return
+        if parsed.path == "/api/generate":
+            self._handle_generate(parsed.query)
+            return
+        self.send_error(HTTPStatus.NOT_FOUND, "Not found")
+
+    def log_message(self, format: str, *args) -> None:
+        return
+
+    def _handle_generate(self, query: str) -> None:
+        params = parse_qs(query)
+        reaction = params.get("reaction", [""])[0]
+        order = params.get("order", ["tree"])[0]
+        compact = params.get("compact", ["0"])[0] == "1"
+        show_leg_ids = params.get("show_leg_ids", ["0"])[0] == "1"
+        show_momenta = params.get("show_momenta", ["1"])[0] == "1"
+
+        try:
+            bundle = generate_diagrams(reaction, order=order)
+            options = RenderOptions(
+                compact=compact,
+                show_leg_ids=show_leg_ids,
+                show_momenta=show_momenta,
+            )
+            payload = {
+                "reaction": bundle.reaction.raw,
+                "order": bundle.order,
+                "notes": list(bundle.notes),
+                "diagrams": [
+                    {
+                        "index": diagram.index,
+                        "title": diagram.title,
+                        "description": diagram.description,
+                        "filename": _diagram_filename(bundle.reaction.raw, diagram.index, diagram.title),
+                        "svg": render_diagram_svg(bundle, diagram, options),
+                    }
+                    for diagram in bundle.diagrams
+                ],
+            }
+            self._send_json(payload)
+        except DiagramGenerationError as exc:
+            self._send_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
+
+    def _send_html(self, content: str) -> None:
+        encoded = content.encode("utf-8")
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(encoded)))
+        self.end_headers()
+        self.wfile.write(encoded)
+
+    def _send_json(self, payload: dict, status: HTTPStatus = HTTPStatus.OK) -> None:
+        encoded = json.dumps(payload).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(encoded)))
+        self.end_headers()
+        self.wfile.write(encoded)
+
+
+def serve(host: str = "127.0.0.1", port: int = 8000) -> None:
+    server = ThreadingHTTPServer((host, port), DiagramHandler)
+    print(f"Serving QED Diagram Editor on http://{host}:{port}")
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        server.server_close()
+
+
+def _diagram_filename(reaction: str, index: int, title: str) -> str:
+    safe_reaction = re.sub(r"-{2,}", "-", "".join(ch if ch.isalnum() else "-" for ch in reaction.lower())).strip("-")
+    safe_title = re.sub(r"-{2,}", "-", "".join(ch if ch.isalnum() else "-" for ch in title.lower())).strip("-")
+    return f"{safe_reaction}-{index}-{safe_title}.svg"
